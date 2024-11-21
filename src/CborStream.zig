@@ -222,7 +222,7 @@ pub const Reader = struct {
     
     const Self = @This();
 
-    pub fn init(data: []const u8) Self {
+    pub fn createFromSlice(data: []const u8) Self {
         return .{
             .raw_reader = undefined,
             .data = data,
@@ -734,7 +734,7 @@ test "Read/Write unsigned int as cbor - Tyny" {
 
     _ = try writer.writeUInt(u8, expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readUInt(u8);
 
@@ -750,7 +750,7 @@ test "Read/Write unsigned int as cbor (nullable#1) - Tyny" {
 
     _ = try writer.writeUInt(u8, expected.?);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readOptional(u8);
 
@@ -766,7 +766,7 @@ test "Read/Write unsigned int as cbor (nullable#2) - Tyny" {
 
     _ = try writer.writeNull();
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readOptional(u8);
 
@@ -782,7 +782,7 @@ test "Read/Write int as cbor - Tyny" {
 
     _ = try writer.writeInt(i8, expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readInt(i8);
 
@@ -798,7 +798,7 @@ test "Read/Write int as cbor (nullable#1) - Tyny" {
 
     _ = try writer.writeUInt(u8, expected.?);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readOptional(i8);
 
@@ -814,7 +814,7 @@ test "Read/Write int as cbor - Short" {
 
     _ = try writer.writeInt(i8, expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readInt(i8);
 
@@ -830,7 +830,7 @@ test "Read/Write unsigned int as cbor - Short" {
 
     _ = try writer.writeUInt(u16, expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readUInt(u16);
 
@@ -846,7 +846,7 @@ test "Read/Write boolean: true as cbor - Tyny" {
 
     _ = try writer.writeBool(expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readBool();
 
@@ -862,7 +862,7 @@ test "Read/Write boolean: false as cbor - Tyny" {
 
     _ = try writer.writeBool(expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readBool();
 
@@ -878,7 +878,7 @@ test "Read/Write boolean: true as cbor (nullable#1) - Tyny" {
 
     _ = try writer.writeBool(expected.?);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readOptional(bool);
 
@@ -896,7 +896,7 @@ test "Read/Write enum as cbor - Tyny" {
 
     _ = try writer.writeEnum(E, expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readEnum(E);
 
@@ -914,7 +914,7 @@ test "Read/Write tagless enum as cbor - Tyny" {
 
     _ = try writer.writeEnum(E, expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readEnum(E);
 
@@ -931,7 +931,7 @@ test "Read/Write negative enum as cbor - Tyny" {
 
     _ = try writer.writeEnum(E, expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readEnum(E);
 
@@ -949,7 +949,7 @@ test "Read/Write tagless enum as cbor (nullable#1) - Tyny" {
 
     _ = try writer.writeEnum(E, expected.?);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readOptional(E);
 
@@ -966,7 +966,7 @@ test "Read/Write enum as cbor - Small" {
 
     _ = try writer.writeEnum(E, expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readEnum(E);
 
@@ -982,7 +982,7 @@ test "Read/Write binary as cbor - Short" {
 
     _ = try writer.writeBytes(expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readBytes();
 
@@ -998,7 +998,7 @@ test "Read/Write binary as cbor - Long" {
 
     _ = try writer.writeBytes(expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readBytes();
 
@@ -1014,7 +1014,7 @@ test "Read/Write string as cbor - Short" {
 
     _ = try writer.writeString(expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readString();
 
@@ -1030,7 +1030,7 @@ test "Read/Write string as cbor - Long" {
 
     _ = try writer.writeString(expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readString();
 
@@ -1046,7 +1046,7 @@ test "Read/Write string as cbor (nullable#1) - Long" {
 
     _ = try writer.writeString(expected.?);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readOptional([]const u8);
 
@@ -1062,7 +1062,7 @@ test "Read/Write string as cbor (nullable#2) - Long" {
 
     _ = try writer.writeNull();
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readOptional([]const u8);
 
@@ -1078,7 +1078,7 @@ test "Read/Write c-style string as cbor - Short" {
 
     _ = try writer.writeCString(expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readCString();
 
@@ -1094,7 +1094,7 @@ test "Read/Write c-style string as cbor - Long" {
 
     _ = try writer.writeCString(expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v = try reader.readCString();
 
@@ -1113,7 +1113,7 @@ test "Read/Write string following unsigned integer as cbor" {
     _ = try writer.writeString(expected_s);
     _ = try writer.writeUInt(u16, expected_u16);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v_s = try reader.readString();
     const v_u16 = try reader.readUInt(u16);
@@ -1134,7 +1134,7 @@ test "Read/Write c-style string following unsigned integer as cbor" {
     _ = try writer.writeCString(expected_s);
     _ = try writer.writeUInt(u16, expected_u16);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const v_s = try reader.readCString();
     const v_u16 = try reader.readUInt(u16);
@@ -1153,7 +1153,7 @@ fn sliceReadWriteTest(comptime T: type, expected: []const T) !void {
 
     _ = try writer.writeSlice(T, expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const values = try reader.readSlice(arena.allocator(), T);
 
@@ -1174,7 +1174,7 @@ test "Read/Write integer slice as cbor (nullable#1) - Tiny" {
     const expected: ?[]i16 = @constCast(&[_]i16{ 1, 3, 5, 7, 11, 13, 17 });
     _ = try writer.writeSlice(i16, expected.?);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const values = try reader.readOptionalWithAllocator(allocator, []const i16);
     defer allocator.free(values.?);
@@ -1191,7 +1191,7 @@ test "Read/Write integer slice as cbor (nullable#2) - Tiny" {
     const expected: ?[]i16 = null;
     _ = try writer.writeNull();
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const values = try reader.readOptionalWithAllocator(allocator, []const i16);
 
@@ -1239,7 +1239,7 @@ fn allocSliceReadWriteTest(comptime T: type, expected: []const T) !void {
 
     _ = try writer.writeSlice(T, expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const values = try reader.readSliceWithAllocator(arena.allocator(), T);
 
@@ -1261,7 +1261,7 @@ fn tupleReadWriteTest(comptime T: type, expected: T) !void {
 
     _ = try writer.writeTuple(T, expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const values = try reader.readTuple(T);
 
@@ -1312,7 +1312,7 @@ test "Read/Write tuple containing slice - Short" {
 
     _ = try writer.writeTuple(TestTuple, expected);
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const values = try reader.readTupleWithAllocator(arena.allocator(), TestTuple);
 
@@ -1338,7 +1338,7 @@ fn optionalTupleReadWriteTest(comptime T: type, expected: ?T) !void {
         _ = try writer.writeNull();
     }
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     const values = try reader.readOptional(T);
 
@@ -1380,7 +1380,7 @@ test "Read/Write tuple (nullable member#4) - Short" {
         _ = try writer.writeNull();
     }
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
@@ -1405,7 +1405,7 @@ test "Read/Write tuple (nullable member#5) - Short" {
         _ = try writer.writeNull();
     }
 
-    var reader = Reader.init(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.buffer.items);
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
