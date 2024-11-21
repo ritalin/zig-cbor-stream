@@ -4,6 +4,8 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    @import("set_version").VersionSetterStep.addStep(b);
+
     const dep_cobore_core = b.dependency("cbor_source", .{});
 
     const lib_core = b.addStaticLibrary(.{
