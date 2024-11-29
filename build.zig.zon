@@ -27,6 +27,10 @@
             .url = "git+https://github.com/libmcu/cbor#f3d1696f886b5f1d8f50cd5ed21521981e50ce15",
             .hash = "1220a3ae11bc664ab55ec406f99c9e23750da2e54d4f61dd0a5cf5ef247763e8a042",
         },
+        .set_version = .{
+            .url = "git+https://github.com/ritalin/zig-set-version#db61db987b1bd6ec4a4fe867999aea6c7b228fdf",
+            .hash = "1220ca307fab053314edf01c8e7c6d338e300f1162d793a4bbaf958e57bd5f509446",
+        },
     },
     .paths = .{
         "build.zig",
