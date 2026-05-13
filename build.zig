@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) void {
     });
     mod_tc.addIncludePath(dep_cobore_core.path("include"));
 
-    const mod_cbor_stream = b.addModule("zig-cbor-stream", .{
+    const mod_cbor_stream = b.addModule("cbor-stream", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
