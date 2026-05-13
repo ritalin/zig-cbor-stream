@@ -3,7 +3,7 @@
 //! start with main.zig instead.
 const std = @import("std");
 
-pub const c = @import("./cbore_core.zig");
+pub const c = @import("cbor_core");
 pub const CborStream = @import("./CborStream.zig");
 
 test "test entry" {
