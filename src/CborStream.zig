@@ -1,89 +1,77 @@
 const std = @import("std");
-
-const c = @import("./cbore_core.zig");
+const c = @import("cbor_core");
 
 const RAW_BUFFER_MAX = 9;
 
 pub const Writer = struct {
-    raw_buffer: std.ArrayList(u8),
-    buffer: std.ArrayList(u8),
-    raw_writer: c.cbor_writer_t,
+    // buffer: [RAW_BUFFER_MAX]u8,
+    interface: *std.Io.Writer,
+    // raw_writer: c.cbor_writer_t,
+
     const Self = @This();
 
-    pub fn init(allocator: std.mem.Allocator) !Self {
-        var writer: c.cbor_writer_t = undefined;
-
-        var raw_buffer = try std.ArrayList(u8).initCapacity(allocator, RAW_BUFFER_MAX);
-        try raw_buffer.resize(RAW_BUFFER_MAX);
-
-        c.cbor_writer_init(&writer, raw_buffer.items.ptr, raw_buffer.items.len);
-        
-        return .{
-            .raw_buffer = raw_buffer,
-            .buffer = std.ArrayList(u8).init(allocator),
-            .raw_writer = writer,
-        };
+    pub fn init(writer: *std.Io.Writer) !Self {
+        return .{ .interface = writer };
     }
 
-    pub fn deinit(self: *Self) void {
-        self.raw_buffer.deinit();
-        self.buffer.deinit();
-    }
+    pub fn deinit(_: *Self) void {}
 
     pub fn writeInt(self: *Self, comptime T: type, value: T) !usize {
         comptime std.debug.assert(@typeInfo(T).int.signedness == .signed);
-        const info = @typeInfo(T).int;
-        const uint_type = @Type(.{
-            .int = .{
-                .signedness = .unsigned,
-                .bits = info.bits,
-            }
-        });
 
         if (value >= 0) {
-            return self.writeUInt(uint_type, @as(uint_type, @intCast(value)));
+            const info = @typeInfo(T).int;
+            const uint_type = @Int(.unsigned, info.bits);
+            return self.writeUInt(uint_type, @intCast(value));
         }
 
-        self.raw_writer.bufidx = 0;
-        try handleErrUnion(c.cbor_encode_negative_integer(&self.raw_writer, value));
-        
-        const write_len = self.raw_writer.bufidx;
-        
-        return self.flushInternal(self.raw_writer.buf[0..write_len]);
+        var buffer: [RAW_BUFFER_MAX]u8 = undefined;
+        var raw_writer = initCborWriterRaw(&buffer);
+
+        try handleErrUnion(c.cbor_encode_negative_integer(&raw_writer, value));
+
+        const write_len = raw_writer.bufidx;
+
+        return self.flushInternal(raw_writer.buf[0..write_len]);
     }
 
     pub fn writeUInt(self: *Self, comptime T: type, value: T) !usize {
-        self.raw_writer.bufidx = 0;
-        try handleErrUnion(c.cbor_encode_unsigned_integer(&self.raw_writer, value));
-        
-        const write_len = self.raw_writer.bufidx;
-        
-        return self.flushInternal(self.raw_writer.buf[0..write_len]);
+        var buffer: [RAW_BUFFER_MAX]u8 = undefined;
+        var raw_writer = initCborWriterRaw(&buffer);
+
+        try handleErrUnion(c.cbor_encode_unsigned_integer(&raw_writer, value));
+
+        const write_len = raw_writer.bufidx;
+        return self.flushInternal(buffer[0..write_len]);
     }
 
     pub fn writeBool(self: *Self, value: bool) !usize {
-        self.raw_writer.bufidx = 0;
-        try handleErrUnion(c.cbor_encode_bool(&self.raw_writer, value));
-        
-        const write_len = self.raw_writer.bufidx;
-        
-        return self.flushInternal(self.raw_writer.buf[0..write_len]);
+        var buffer: [RAW_BUFFER_MAX]u8 = undefined;
+        var raw_writer = initCborWriterRaw(&buffer);
+
+        try handleErrUnion(c.cbor_encode_bool(&raw_writer, value));
+
+        const write_len = raw_writer.bufidx;
+
+        return self.flushInternal(raw_writer.buf[0..write_len]);
     }
 
     pub fn writeNull(self: *Self) !usize {
-        self.raw_writer.bufidx = 0;
-        try handleErrUnion(c.cbor_encode_null(&self.raw_writer));
-            
-        const write_len = self.raw_writer.bufidx;
-        
-        return self.flushInternal(self.raw_writer.buf[0..write_len]);
+        var buffer: [RAW_BUFFER_MAX]u8 = undefined;
+        var raw_writer = initCborWriterRaw(&buffer);
+
+        try handleErrUnion(c.cbor_encode_null(&raw_writer));
+
+        const write_len = raw_writer.bufidx;
+
+        return self.flushInternal(raw_writer.buf[0..write_len]);
     }
 
     pub fn writeEnum(self: *Self, comptime T: type, value: T) !usize {
         comptime std.debug.assert(@typeInfo(T) == .@"enum");
 
         const tag_type = @typeInfo(T).@"enum".tag_type;
-        
+
         if (@typeInfo(tag_type).int.signedness == .signed) {
             return self.writeInt(tag_type, @intFromEnum(value));
         }
@@ -94,28 +82,21 @@ pub const Writer = struct {
 
     pub fn writeBytes(self: *Self, value: []const u8) !usize {
         const write_size = try self.writeLength(2, value.len);
-        
-        var writer = self.buffer.writer();
-        try writer.writeAll(value);
-
+        try self.interface.writeAll(value);
         return write_size + value.len;
     }
 
     pub fn writeString(self: *Self, value: []const u8) !usize {
         const write_size = try self.writeLength(3, value.len);
-        
-        var writer = self.buffer.writer();
-        try writer.writeAll(value);
+        try self.interface.writeAll(value);
 
         return write_size + value.len;
     }
 
     pub fn writeCString(self: *Self, value: [:0]const u8) !usize {
         const write_size = try self.writeLength(3, value.len+1);
-        
-        var writer = self.buffer.writer();
-        try writer.writeAll(value);
-        try writer.writeByte(0);
+        try self.interface.writeAll(value);
+        try self.interface.writeByte(0);
         return write_size + value.len + 1;
     }
 
@@ -135,7 +116,7 @@ pub const Writer = struct {
 
     pub fn writeTuple(self: *Self, comptime T: type, values: T) !usize {
         comptime std.debug.assert(@typeInfo(T).@"struct".is_tuple);
-        
+
         const fields = @typeInfo(T).@"struct".fields;
         var write_size = try self.writeLength(4, fields.len);
 
@@ -163,10 +144,10 @@ pub const Writer = struct {
                 return self.writeEnum(T, value);
             },
             .pointer => |t| {
-                std.debug.assert(t.size == .Slice);
+                std.debug.assert(t.size == .slice);
 
                 if (t.child == u8) {
-                    if (t.sentinel == null) {
+                    if (t.sentinel_ptr == null) {
                         return self.writeString(value);
                     }
                     else {
@@ -198,28 +179,35 @@ pub const Writer = struct {
     }
 
     fn writeLength(self: *Self, main_type: u8, value: usize) !usize {
-        self.raw_writer.bufidx = 0;
-        try handleErrUnion(c.cbor_encode_unsigned_integer(&self.raw_writer, value));
-        
-        self.raw_writer.buf[0] |= (main_type << 5);
-        const write_len = self.raw_writer.bufidx;
-        
-        return self.flushInternal(self.raw_writer.buf[0..write_len]);
+        var buffer: [RAW_BUFFER_MAX]u8 = undefined;
+        var raw_writer = initCborWriterRaw(&buffer);
+
+        try handleErrUnion(c.cbor_encode_unsigned_integer(&raw_writer, value));
+
+        raw_writer.buf[0] |= (main_type << 5);
+        const write_len = raw_writer.bufidx;
+
+        return self.flushInternal(raw_writer.buf[0..write_len]);
     }
 
     fn flushInternal(self: *Self, data: []const u8) !usize {
-        var writer = self.buffer.writer();
-        try writer.writeAll(data);
+        try self.interface.writeAll(data);
 
         return data.len;
     }
 };
 
+fn initCborWriterRaw(buffer: []u8) c.cbor_writer_t {
+    var raw_writer: c.cbor_writer_t = undefined;
+    c.cbor_writer_init(&raw_writer, buffer.ptr, buffer.len);
+    return raw_writer;
+}
+
 pub const Reader = struct {
     raw_reader: c.cbor_reader_t,
     data: []const u8,
     offset: usize,
-    
+
     const Self = @This();
 
     pub fn createFromSlice(data: []const u8) Self {
@@ -255,7 +243,7 @@ pub const Reader = struct {
         try handleErrUnion(c.cbor_decode(&self.raw_reader, &result, &value, @sizeOf(bool)));
 
         self.offset += self.raw_reader.msgidx;
-        
+
         return value;
     }
 
@@ -286,12 +274,12 @@ pub const Reader = struct {
         try handleErrUnion(c.cbor_parse(reader, data.ptr, data.len, null));
     }
 
-    fn readIntInternal(self: *Self, comptime T: type, result: c.cbor_item_t) !T {     
+    fn readIntInternal(self: *Self, comptime T: type, result: c.cbor_item_t) !T {
         var value: T = undefined;
         try handleErrUnion(c.cbor_decode(&self.raw_reader, &result, &value, @sizeOf(T)));
 
         self.offset += self.raw_reader.msgidx;
-        
+
         return value;
     }
 
@@ -300,7 +288,7 @@ pub const Reader = struct {
         std.debug.assert(result.type == c.CBOR_ITEM_SIMPLE_VALUE);
 
         self.offset += self.raw_reader.msgidx;
-        
+
         return null;
     }
 
@@ -313,7 +301,7 @@ pub const Reader = struct {
         if ((item.type == c.CBOR_ITEM_SIMPLE_VALUE) and (item.size == 0)) {
             var v: u8 = undefined;
             try handleErrUnion(c.cbor_decode(&self.raw_reader, &item, &v, @sizeOf(u8)));
-            
+
             if (v == 0) return true;
         }
 
@@ -365,11 +353,11 @@ pub const Reader = struct {
     pub fn readSliceWithAllocator(self: *Self, allocator: std.mem.Allocator, comptime T: type) ![]const T {
         return self.readSliceWithAllocatorInternal(allocator, T, allocator);
     }
-    
+
     fn readSliceWithAllocatorInternal(self: *Self, allocator: std.mem.Allocator, comptime T: type, member_allocator: ?std.mem.Allocator) ![]const T {
         const prev_items = self.raw_reader.items;
         defer self.raw_reader.items = prev_items;
-        
+
         const item = try parseOne(&self.raw_reader, self.data[self.offset..]);
         return try self.readSliceRecursive(allocator, T, item, member_allocator);
     }
@@ -380,7 +368,7 @@ pub const Reader = struct {
         const values = try allocator.alloc(T, item.size);
 
         const child_info = @typeInfo(T);
-        
+
         const cbor_member = comptime CborMember.matchType(T);
 
         for (values) |*v| {
@@ -393,7 +381,7 @@ pub const Reader = struct {
                     continue;
                 }
             }
-            
+
             switch (cbor_member.type) {
                 inline .Int, .Bool, .Enum, .String, .CString, .Tuple => {
                     const item_ty = type_item: {
@@ -402,9 +390,9 @@ pub const Reader = struct {
                         }
                         else {
                             break:type_item T;
-                        }   
+                        }
                     };
-                    
+
                     v.* = try self.readContainerField(item_ty, cbor_member.type, child_item, member_allocator);
                 },
                 inline .Slice => {
@@ -414,9 +402,9 @@ pub const Reader = struct {
                         }
                         else {
                             break:type_item child_info.pointer.child;
-                        }   
+                        }
                     };
-                    
+
                     v.* = try self.readSliceRecursive(allocator, item_ty, child_item, member_allocator);
                 },
             }
@@ -428,7 +416,7 @@ pub const Reader = struct {
     pub fn readTuple(self: *Self, comptime T: type) !T {
         return self.readTupleInternal(T, null);
     }
-    
+
     pub fn readTupleWithAllocator(self: *Self, allocator: std.mem.Allocator, comptime T: type) !T {
         return self.readTupleInternal(T, allocator);
     }
@@ -438,7 +426,7 @@ pub const Reader = struct {
 
         const prev_items = self.raw_reader.items;
         defer self.raw_reader.items = prev_items;
-        
+
         const item = try parseOne(&self.raw_reader, self.data[self.offset..]);
         return try self.readTupleRecursive(T, item, member_allocator);
     }
@@ -509,12 +497,12 @@ pub const Reader = struct {
         const cbor_member = comptime CborMember.matchType(T);
 
         switch (cbor_member.type) {
-            .Slice => { 
+            .Slice => {
                 if (allocator) |a| {
                     return try self.readSliceWithAllocator(a, @typeInfo(T).pointer.child);
                 }
-                @panic("Optional slice needs `member_allocator`. Call `readOptionalWithAllocator`\n");  
-            },          
+                @panic("Optional slice needs `member_allocator`. Call `readOptionalWithAllocator`\n");
+            },
             .Tuple => {
                 return try self.readTupleInternal(T, allocator);
             },
@@ -584,9 +572,9 @@ pub const CborMember = struct {
             .bool => return .{.type = .Bool, .option = .{}},
             .@"enum" => return .{.type = .Enum, .option = .{}},
             .pointer => |t| {
-                if (t.size == .Slice) {
+                if (t.size == .slice) {
                     if (t.child == u8) {
-                        if (t.sentinel) |_| {
+                        if (t.sentinel_ptr) |_| {
                             return .{.type = .CString, .option = .{}};
                         }
                         else {
@@ -709,7 +697,7 @@ pub const Lexer = struct {
         CBOR_ITEM_ARRAY = c.CBOR_ITEM_ARRAY,
         CBOR_ITEM_MAP = c.CBOR_ITEM_MAP,
         CBOR_ITEM_FLOAT = c.CBOR_ITEM_FLOAT,
-        CBOR_ITEM_SIMPLE_VALUE = c.CBOR_ITEM_SIMPLE_VALUE,        
+        CBOR_ITEM_SIMPLE_VALUE = c.CBOR_ITEM_SIMPLE_VALUE,
     };
 
     fn headerTag(header: c.cbor_item_data_t) HeaderTag {
@@ -727,47 +715,50 @@ pub const Lexer = struct {
 
 test "Read/Write unsigned int as cbor - Tyny" {
     const allocator = std.testing.allocator;
-    
-    const expected = 15;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected = 15;
     _ = try writer.writeUInt(u8, expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readUInt(u8);
 
     try std.testing.expectEqual(expected, v);
 }
 
-test "Read/Write unsigned int as cbor (nullable#1) - Tyny" {
+test "Read/Write unsigned-int as cbor (nullable#1) - Tyny" {
     const allocator = std.testing.allocator;
-    
-    const expected: ?u8 = 15;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: ?u8 = 15;
     _ = try writer.writeUInt(u8, expected.?);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readOptional(u8);
 
     try std.testing.expectEqual(expected, v);
 }
 
-test "Read/Write unsigned int as cbor (nullable#2) - Tyny" {
+test "Read/Write unsigned-int as cbor (nullable#2) - Tyny" {
     const allocator = std.testing.allocator;
-    
-    const expected: ?u8 = null;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: ?u8 = null;
     _ = try writer.writeNull();
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readOptional(u8);
 
     try std.testing.expectEqual(expected, v);
@@ -775,15 +766,16 @@ test "Read/Write unsigned int as cbor (nullable#2) - Tyny" {
 
 test "Read/Write int as cbor - Tyny" {
     const allocator = std.testing.allocator;
-    
-    const expected = 21;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected = 21;
     _ = try writer.writeInt(i8, expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readInt(i8);
 
     try std.testing.expectEqual(expected, v);
@@ -791,15 +783,16 @@ test "Read/Write int as cbor - Tyny" {
 
 test "Read/Write int as cbor (nullable#1) - Tyny" {
     const allocator = std.testing.allocator;
-    
-    const expected: ?i8 = 15;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: ?i8 = 15;
     _ = try writer.writeUInt(u8, expected.?);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readOptional(i8);
 
     try std.testing.expectEqual(expected, v);
@@ -807,15 +800,16 @@ test "Read/Write int as cbor (nullable#1) - Tyny" {
 
 test "Read/Write int as cbor - Short" {
     const allocator = std.testing.allocator;
-    
-    const expected = -127;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected = -127;
     _ = try writer.writeInt(i8, expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readInt(i8);
 
     try std.testing.expectEqual(expected, v);
@@ -823,15 +817,16 @@ test "Read/Write int as cbor - Short" {
 
 test "Read/Write unsigned int as cbor - Short" {
     const allocator = std.testing.allocator;
-    
-    const expected = 12345;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected = 12345;
     _ = try writer.writeUInt(u16, expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readUInt(u16);
 
     try std.testing.expectEqual(expected, v);
@@ -840,14 +835,15 @@ test "Read/Write unsigned int as cbor - Short" {
 test "Read/Write boolean: true as cbor - Tyny" {
     const allocator = std.testing.allocator;
 
-    const expected = true;
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected = true;
     _ = try writer.writeBool(expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readBool();
 
     try std.testing.expectEqual(expected, v);
@@ -856,14 +852,15 @@ test "Read/Write boolean: true as cbor - Tyny" {
 test "Read/Write boolean: false as cbor - Tyny" {
     const allocator = std.testing.allocator;
 
-    const expected = false;
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected = false;
     _ = try writer.writeBool(expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readBool();
 
     try std.testing.expectEqual(expected, v);
@@ -872,14 +869,15 @@ test "Read/Write boolean: false as cbor - Tyny" {
 test "Read/Write boolean: true as cbor (nullable#1) - Tyny" {
     const allocator = std.testing.allocator;
 
-    const expected: ?bool = true;
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: ?bool = true;
     _ = try writer.writeBool(expected.?);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readOptional(bool);
 
     try std.testing.expectEqual(expected, v);
@@ -890,14 +888,15 @@ test "Read/Write enum as cbor - Tyny" {
 
     const allocator = std.testing.allocator;
 
-    const expected: E = .e2;
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: E = .e2;
     _ = try writer.writeEnum(E, expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readEnum(E);
 
     try std.testing.expectEqual(expected, v);
@@ -908,14 +907,15 @@ test "Read/Write tagless enum as cbor - Tyny" {
 
     const allocator = std.testing.allocator;
 
-    const expected: E = .e3;
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: E = .e3;
     _ = try writer.writeEnum(E, expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readEnum(E);
 
     try std.testing.expectEqual(expected, v);
@@ -925,14 +925,16 @@ test "Read/Write negative enum as cbor - Tyny" {
     const E = enum (i8) { e1 = -1, e2, e3, };
 
     const allocator = std.testing.allocator;
-    const expected: E = .e1;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: E = .e1;
     _ = try writer.writeEnum(E, expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readEnum(E);
 
     try std.testing.expectEqual(expected, v);
@@ -943,14 +945,15 @@ test "Read/Write tagless enum as cbor (nullable#1) - Tyny" {
 
     const allocator = std.testing.allocator;
 
-    const expected: ?E = .e3;
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: ?E = .e3;
     _ = try writer.writeEnum(E, expected.?);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readOptional(E);
 
     try std.testing.expectEqual(expected, v);
@@ -960,14 +963,16 @@ test "Read/Write enum as cbor - Small" {
     const E = enum (u16) { e1 = 100, e2, e3, };
 
     const allocator = std.testing.allocator;
-    const expected: E = .e2;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: E = .e2;
     _ = try writer.writeEnum(E, expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readEnum(E);
 
     try std.testing.expectEqual(expected, v);
@@ -975,15 +980,16 @@ test "Read/Write enum as cbor - Small" {
 
 test "Read/Write binary as cbor - Short" {
     const allocator = std.testing.allocator;
-    
-    const expected: []const u8 = "\x03\x05" ** 10;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: []const u8 = "\x03\x05" ** 10;
     _ = try writer.writeBytes(expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readBytes();
 
     try std.testing.expectEqualSlices(u8, expected, v);
@@ -991,15 +997,16 @@ test "Read/Write binary as cbor - Short" {
 
 test "Read/Write binary as cbor - Long" {
     const allocator = std.testing.allocator;
-    
-    const expected: []const u8 = "\x03\x05" ** 100;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: []const u8 = "\x03\x05" ** 100;
     _ = try writer.writeBytes(expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readBytes();
 
     try std.testing.expectEqualSlices(u8, expected, v);
@@ -1007,15 +1014,16 @@ test "Read/Write binary as cbor - Long" {
 
 test "Read/Write string as cbor - Short" {
     const allocator = std.testing.allocator;
-    
-    const expected: []const u8 = "19" ** 10;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: []const u8 = "19" ** 10;
     _ = try writer.writeString(expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readString();
 
     try std.testing.expectEqualStrings(expected, v);
@@ -1023,14 +1031,16 @@ test "Read/Write string as cbor - Short" {
 
 test "Read/Write string as cbor - Long" {
     const allocator = std.testing.allocator;
-    
-    const expected: []const u8 = "19" ** 128;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: []const u8 = "19" ** 128;
     _ = try writer.writeString(expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const v = try reader.readString();
 
@@ -1039,14 +1049,16 @@ test "Read/Write string as cbor - Long" {
 
 test "Read/Write string as cbor (nullable#1) - Long" {
     const allocator = std.testing.allocator;
-    
-    const expected: ?[]const u8 = "19" ** 128;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: ?[]const u8 = "19" ** 128;
     _ = try writer.writeString(expected.?);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const v = try reader.readOptional([]const u8);
 
@@ -1055,30 +1067,34 @@ test "Read/Write string as cbor (nullable#1) - Long" {
 
 test "Read/Write string as cbor (nullable#2) - Long" {
     const allocator = std.testing.allocator;
-    
-    const expected: ?[]const u8 = null;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
     _ = try writer.writeNull();
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const v = try reader.readOptional([]const u8);
 
+    const expected: ?[]const u8 = null;
     try std.testing.expectEqualDeep(expected, v);
 }
 
 test "Read/Write c-style string as cbor - Short" {
     const allocator = std.testing.allocator;
-    
-    const expected: [:0]const u8 = "19" ** 10;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: [:0]const u8 = "19" ** 10;
     _ = try writer.writeCString(expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const v = try reader.readCString();
 
@@ -1087,14 +1103,16 @@ test "Read/Write c-style string as cbor - Short" {
 
 test "Read/Write c-style string as cbor - Long" {
     const allocator = std.testing.allocator;
-    
-    const expected: [:0]const u8 = "19" ** 168;
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
+    const expected: [:0]const u8 = "19" ** 168;
     _ = try writer.writeCString(expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const v = try reader.readCString();
 
@@ -1103,17 +1121,19 @@ test "Read/Write c-style string as cbor - Long" {
 
 test "Read/Write string following unsigned integer as cbor" {
     const allocator = std.testing.allocator;
-    
+
     const expected_s: []const u8 = "19" ** 10;
     const expected_u16: u16 = 1024;
 
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
     _ = try writer.writeString(expected_s);
     _ = try writer.writeUInt(u16, expected_u16);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const v_s = try reader.readString();
     const v_u16 = try reader.readUInt(u16);
@@ -1124,17 +1144,19 @@ test "Read/Write string following unsigned integer as cbor" {
 
 test "Read/Write c-style string following unsigned integer as cbor" {
     const allocator = std.testing.allocator;
-    
+
     const expected_s: [:0]const u8 = "19" ** 10;
     const expected_u16: u16 = 1024;
 
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
     _ = try writer.writeCString(expected_s);
     _ = try writer.writeUInt(u16, expected_u16);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const v_s = try reader.readCString();
     const v_u16 = try reader.readUInt(u16);
@@ -1148,16 +1170,18 @@ fn sliceReadWriteTest(comptime T: type, expected: []const T) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
     _ = try writer.writeSlice(T, expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const values = try reader.readSlice(arena.allocator(), T);
 
-    try std.testing.expectEqualDeep(expected, values);    
+    try std.testing.expectEqualDeep(expected, values);
 }
 
 test "Read/Write integer slice as cbor - Tiny" {
@@ -1168,34 +1192,38 @@ test "Read/Write integer slice as cbor - Tiny" {
 test "Read/Write integer slice as cbor (nullable#1) - Tiny" {
     const allocator = std.testing.allocator;
 
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
     const expected: ?[]i16 = @constCast(&[_]i16{ 1, 3, 5, 7, 11, 13, 17 });
     _ = try writer.writeSlice(i16, expected.?);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const values = try reader.readOptionalWithAllocator(allocator, []const i16);
     defer allocator.free(values.?);
 
-    try std.testing.expectEqualDeep(expected, values);    
+    try std.testing.expectEqualDeep(expected, values);
 }
 
 test "Read/Write integer slice as cbor (nullable#2) - Tiny" {
     const allocator = std.testing.allocator;
 
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
     const expected: ?[]i16 = null;
     _ = try writer.writeNull();
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
+    var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const values = try reader.readOptionalWithAllocator(allocator, []const i16);
 
-    try std.testing.expectEqualDeep(expected, values);    
+    try std.testing.expectEqualDeep(expected, values);
 }
 
 test "Read/Write integer slice as cbor - Short" {
@@ -1234,16 +1262,17 @@ fn allocSliceReadWriteTest(comptime T: type, expected: []const T) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
     _ = try writer.writeSlice(T, expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const values = try reader.readSliceWithAllocator(arena.allocator(), T);
 
-    try std.testing.expectEqualDeep(expected, values);    
+    try std.testing.expectEqualDeep(expected, values);
 }
 
 test "Read/Write 2D string array as cbor; cloning with allocator - Short" {
@@ -1255,14 +1284,15 @@ fn tupleReadWriteTest(comptime T: type, expected: T) !void {
     const allocator = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
     _ = try writer.writeTuple(T, expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const values = try reader.readTuple(T);
 
     try std.testing.expectEqualDeep(expected, values);
@@ -1289,7 +1319,7 @@ test "Read/Write string and int tuple - Short" {
 test "Read/Write bool and string tuple - Short" {
     const TestTuple = struct {[]const u8, bool};
     const expected: TestTuple = .{ "item_1", false };
-    try tupleReadWriteTest(TestTuple, expected);    
+    try tupleReadWriteTest(TestTuple, expected);
 }
 
 test "Read/Write nested int tuple - Short" {
@@ -1303,17 +1333,18 @@ test "Read/Write tuple containing slice - Short" {
     const allocator = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    
+
     const TestTuple = struct {[]const u32, []const []const u8};
     const expected: TestTuple = .{ &.{42, 101}, &.{ "item_1", "qwerty" } };
 
-    var writer = try Writer.init(allocator);
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
     _ = try writer.writeTuple(TestTuple, expected);
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const values = try reader.readTupleWithAllocator(arena.allocator(), TestTuple);
 
     try std.testing.expectEqualDeep(expected, values);
@@ -1327,8 +1358,10 @@ test "Read/Write tuple slice slice - Short" {
 
 fn optionalTupleReadWriteTest(comptime T: type, expected: ?T) !void {
     const allocator = std.testing.allocator;
-    
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
     if (expected) |v| {
@@ -1338,8 +1371,7 @@ fn optionalTupleReadWriteTest(comptime T: type, expected: ?T) !void {
         _ = try writer.writeNull();
     }
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     const values = try reader.readOptional(T);
 
     try std.testing.expectEqualDeep(expected, values);
@@ -1369,8 +1401,10 @@ test "Read/Write tuple (nullable member#4) - Short" {
     const T = struct {u8, ?[]const i32};
     const expected: ?T = .{42, &.{1, -2, 4, -8, 16}};
     const allocator = std.testing.allocator;
-    
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
     if (expected) |v| {
@@ -1380,8 +1414,7 @@ test "Read/Write tuple (nullable member#4) - Short" {
         _ = try writer.writeNull();
     }
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
@@ -1394,8 +1427,10 @@ test "Read/Write tuple (nullable member#5) - Short" {
     const T = struct {u8, ?[]const ?i32};
     const expected: ?T = .{42, &.{null, -2, 4, -8, 16}};
     const allocator = std.testing.allocator;
-    
-    var writer = try Writer.init(allocator);
+
+    var buffer = std.Io.Writer.Allocating.init(allocator);
+    defer buffer.deinit();
+    var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
     if (expected) |v| {
@@ -1405,8 +1440,7 @@ test "Read/Write tuple (nullable member#5) - Short" {
         _ = try writer.writeNull();
     }
 
-    var reader = Reader.createFromSlice(writer.buffer.items);
-
+    var reader = Reader.createFromSlice(buffer.writer.buffer);
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
 
