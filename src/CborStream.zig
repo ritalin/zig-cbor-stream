@@ -524,12 +524,10 @@ pub const Reader = struct {
                 return try self.readEnum(T);
             },
             .String => {
-                const v = try self.readString();
-                return if (member_allocator) |a| try a.dupe(u8, v) else v;
+                return try self.readString();
             },
             .CString => {
-                const v = try self.readCString();
-                return if (member_allocator) |a| try a.dupeZ(u8, v) else v;
+                return try self.readCString();
             },
             .Tuple => {
                 return self.readTupleInternal(T, member_allocator);
