@@ -11,6 +11,10 @@
             .url = "git+https://github.com/ritalin/zig-set-version#cfe4fcf0d131a0db829f34e004896aaa7f093371",
             .hash = "zig_set_version-0.3.0-VcSFV5pjAAD05typBYB830IiYXkM2SfER2VZfqgnAlEH",
         },
+        .set_version = .{
+            .url = "git+https://github.com/ritalin/zig-set-version#db61db987b1bd6ec4a4fe867999aea6c7b228fdf",
+            .hash = "1220ca307fab053314edf01c8e7c6d338e300f1162d793a4bbaf958e57bd5f509446",
+        },
     },
     .paths = .{
         "build.zig",
