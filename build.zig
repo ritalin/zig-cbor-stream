@@ -8,16 +8,13 @@ pub fn build(b: *std.Build) void {
 
     const dep_cobore_core = b.dependency("cbor_source", .{});
 
-    const lib_core = b.addLibrary(.{
-        .name = "CborCore",
-        .root_module = b.createModule(.{
-            .target = target,
-            .optimize = optimize,
-            .link_libc = true,
-        })
+    const mod_cbore_core = b.addModule("cbor-core", .{
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
     });
-    lib_core.root_module.addIncludePath(dep_cobore_core.path("include"));
-    lib_core.root_module.addCSourceFiles(.{
+    mod_cbore_core.addIncludePath(dep_cobore_core.path("include"));
+    mod_cbore_core.addCSourceFiles(.{
         .root = dep_cobore_core.path("src/"),
         .files = &.{
             "encoder.c",
@@ -26,6 +23,11 @@ pub fn build(b: *std.Build) void {
             "parser.c",
             "ieee754.c",
         }
+    });
+    
+    const lib_core = b.addLibrary(.{
+        .name = "CborCore",
+        .root_module = mod_cbore_core,
     });
     lib_core.installHeadersDirectory(dep_cobore_core.path("include/cbor"), "cbor", .{});
     b.installArtifact(lib_core);
