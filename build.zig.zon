@@ -1,6 +1,6 @@
 .{
     .name = .zig_cbor_stream,
-    .version = "0.2.4",
+    .version = "0.2.5",
     .fingerprint = 0x4c59b7425889069b,
     .dependencies = .{
         .cbor_source = .{
