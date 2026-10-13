@@ -8,8 +8,8 @@
             .hash = "N-V-__8AACRpBAAeoRfQCzWzdUiwrurJnOuNR3M4RcTNFqg-",
         },
         .set_version = .{
-            .url = "git+https://github.com/ritalin/zig-set-version#cfe4fcf0d131a0db829f34e004896aaa7f093371",
-            .hash = "zig_set_version-0.3.0-VcSFV5pjAAD05typBYB830IiYXkM2SfER2VZfqgnAlEH",
+            .url = "git+https://github.com/ritalin/zig-set-version#74a872f5cf32e69d96829d5ed2c4efc958485c84",
+            .hash = "zig_set_version-0.5.1-VcSFV5ptAAC450GgiMI8GzAsPdp5_XbRpMCvfK05Vz4L",
         },
     },
     .paths = .{
