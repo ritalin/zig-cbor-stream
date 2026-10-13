@@ -117,11 +117,11 @@ pub const Writer = struct {
     pub fn writeTuple(self: *Self, comptime T: type, values: T) !usize {
         comptime std.debug.assert(@typeInfo(T).@"struct".is_tuple);
 
-        const fields = @typeInfo(T).@"struct".fields;
-        var write_size = try self.writeLength(4, fields.len);
+        const info: std.lang.Type.Struct = @typeInfo(T).@"struct";
+        var write_size = try self.writeLength(4, info.field_names.len);
 
-        inline for (fields) |field| {
-            write_size += try self.writeContainerField(field.type, @field(values, field.name));
+        inline for (info.field_names, info.field_types) |field_name, field_type| {
+            write_size += try self.writeContainerField(field_type, @field(values, field_name));
         }
 
         return write_size;
@@ -434,34 +434,34 @@ pub const Reader = struct {
     fn readTupleRecursive(self: *Self, comptime T: type, item: c.cbor_item_t, member_allocator: ?std.mem.Allocator) !T {
         self.offset += item.offset;
 
-        const fields = @typeInfo(T).@"struct".fields;
+        const info: std.lang.Type.Struct = @typeInfo(T).@"struct";
         var value: T = undefined;
 
-        inline for (fields) |field| {
+        inline for (info.field_names, info.field_types) |field_name, field_type| {
             const child_item = try parseOne(&self.raw_reader, self.data[self.offset..]);
-            const cbor_member = comptime CborMember.matchType(field.type);
+            const cbor_member = comptime CborMember.matchType(field_type);
 
             if (cbor_member.option.nullable and try self.isNullResult(child_item)) {
-                @field(value, field.name) = null;
+                @field(value, field_name) = null;
                 self.offset += self.raw_reader.msgidx;
             }
             else {
                 switch(cbor_member.type) {
                     inline .Int, .Bool, .Enum, .String, .CString, .Tuple => {
-                        @field(value, field.name) = try self.readContainerField(field.type, cbor_member.type, child_item, member_allocator);
+                        @field(value, field_name) = try self.readContainerField(field_type, cbor_member.type, child_item, member_allocator);
                     },
                     inline .Slice => {
                         if (member_allocator) |a| {
                             const slice_member_type = tuple_member: {
                                 if (cbor_member.option.nullable) {
-                                    const type_opt = @typeInfo(field.type).optional;
+                                    const type_opt = @typeInfo(field_type).optional;
                                     break:tuple_member @typeInfo(type_opt.child).pointer;
                                 }
                                 else {
-                                    break:tuple_member @typeInfo(field.type).pointer;
+                                    break:tuple_member @typeInfo(field_type).pointer;
                                 }
                             };
-                            @field(value, field.name) = try self.readSliceRecursive(a, slice_member_type.child, child_item, member_allocator);
+                            @field(value, field_name) = try self.readSliceRecursive(a, slice_member_type.child, child_item, member_allocator);
                         }
                         else {
                             @panic("A tupe containing the slice needs `member_allocator`\n");
@@ -984,13 +984,13 @@ test "Read/Write binary as cbor - Short" {
     var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
-    const expected: []const u8 = "\x03\x05" ** 10;
-    _ = try writer.writeBytes(expected);
+    const expected: [20]u8 = @splat('\x03');
+    _ = try writer.writeBytes(&expected);
 
     var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readBytes();
 
-    try std.testing.expectEqualSlices(u8, expected, v);
+    try std.testing.expectEqualSlices(u8, &expected, v);
 }
 
 test "Read/Write binary as cbor - Long" {
@@ -1001,13 +1001,13 @@ test "Read/Write binary as cbor - Long" {
     var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
-    const expected: []const u8 = "\x03\x05" ** 100;
-    _ = try writer.writeBytes(expected);
+    const expected: [200]u8 = @splat('\x03');
+    _ = try writer.writeBytes(&expected);
 
     var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readBytes();
 
-    try std.testing.expectEqualSlices(u8, expected, v);
+    try std.testing.expectEqualSlices(u8, &expected, v);
 }
 
 test "Read/Write string as cbor - Short" {
@@ -1018,13 +1018,13 @@ test "Read/Write string as cbor - Short" {
     var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
-    const expected: []const u8 = "19" ** 10;
-    _ = try writer.writeString(expected);
+    const expected: [20]u8 = @splat('9');
+    _ = try writer.writeString(&expected);
 
     var reader = Reader.createFromSlice(buffer.writer.buffer);
     const v = try reader.readString();
 
-    try std.testing.expectEqualStrings(expected, v);
+    try std.testing.expectEqualStrings(&expected, v);
 }
 
 test "Read/Write string as cbor - Long" {
@@ -1035,14 +1035,14 @@ test "Read/Write string as cbor - Long" {
     var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
-    const expected: []const u8 = "19" ** 128;
-    _ = try writer.writeString(expected);
+    const expected: [256]u8 = @splat('9');
+    _ = try writer.writeString(&expected);
 
     var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const v = try reader.readString();
 
-    try std.testing.expectEqualStrings(expected, v);
+    try std.testing.expectEqualStrings(&expected, v);
 }
 
 test "Read/Write string as cbor (nullable#1) - Long" {
@@ -1053,14 +1053,14 @@ test "Read/Write string as cbor (nullable#1) - Long" {
     var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
-    const expected: ?[]const u8 = "19" ** 128;
-    _ = try writer.writeString(expected.?);
+    const expected: [20]u8 = @splat('9');
+    _ = try writer.writeString(&expected);
 
     var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const v = try reader.readOptional([]const u8);
 
-    try std.testing.expectEqualDeep(expected, v);
+    try std.testing.expectEqualDeep(&expected, v);
 }
 
 test "Read/Write string as cbor (nullable#2) - Long" {
@@ -1089,14 +1089,14 @@ test "Read/Write c-style string as cbor - Short" {
     var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
-    const expected: [:0]const u8 = "19" ** 10;
-    _ = try writer.writeCString(expected);
+    const expected: [20:0]u8 = @splat('9');
+    _ = try writer.writeCString(&expected);
 
     var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const v = try reader.readCString();
 
-    try std.testing.expectEqualStrings(expected, v);
+    try std.testing.expectEqualStrings(&expected, v);
 }
 
 test "Read/Write c-style string as cbor - Long" {
@@ -1107,20 +1107,20 @@ test "Read/Write c-style string as cbor - Long" {
     var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
-    const expected: [:0]const u8 = "19" ** 168;
-    _ = try writer.writeCString(expected);
+    const expected: [336:0]u8 = @splat('9');
+    _ = try writer.writeCString(&expected);
 
     var reader = Reader.createFromSlice(writer.interface.buffer);
 
     const v = try reader.readCString();
 
-    try std.testing.expectEqualStrings(expected, v);
+    try std.testing.expectEqualStrings(&expected, v);
 }
 
 test "Read/Write string following unsigned integer as cbor" {
     const allocator = std.testing.allocator;
 
-    const expected_s: []const u8 = "19" ** 10;
+    const expected_s: [20]u8 = @splat('9');
     const expected_u16: u16 = 1024;
 
     var buffer = std.Io.Writer.Allocating.init(allocator);
@@ -1128,7 +1128,7 @@ test "Read/Write string following unsigned integer as cbor" {
     var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
-    _ = try writer.writeString(expected_s);
+    _ = try writer.writeString(&expected_s);
     _ = try writer.writeUInt(u16, expected_u16);
 
     var reader = Reader.createFromSlice(writer.interface.buffer);
@@ -1136,14 +1136,14 @@ test "Read/Write string following unsigned integer as cbor" {
     const v_s = try reader.readString();
     const v_u16 = try reader.readUInt(u16);
 
-    try std.testing.expectEqualStrings(expected_s, v_s);
+    try std.testing.expectEqualStrings(&expected_s, v_s);
     try std.testing.expectEqual(expected_u16, v_u16);
 }
 
 test "Read/Write c-style string following unsigned integer as cbor" {
     const allocator = std.testing.allocator;
 
-    const expected_s: [:0]const u8 = "19" ** 10;
+    const expected_s: [20:0]u8 = @splat('9');
     const expected_u16: u16 = 1024;
 
     var buffer = std.Io.Writer.Allocating.init(allocator);
@@ -1151,7 +1151,7 @@ test "Read/Write c-style string following unsigned integer as cbor" {
     var writer = try Writer.init(&buffer.writer);
     defer writer.deinit();
 
-    _ = try writer.writeCString(expected_s);
+    _ = try writer.writeCString(&expected_s);
     _ = try writer.writeUInt(u16, expected_u16);
 
     var reader = Reader.createFromSlice(writer.interface.buffer);
@@ -1159,7 +1159,7 @@ test "Read/Write c-style string following unsigned integer as cbor" {
     const v_s = try reader.readCString();
     const v_u16 = try reader.readUInt(u16);
 
-    try std.testing.expectEqualStrings(expected_s, v_s);
+    try std.testing.expectEqualStrings(&expected_s, v_s);
     try std.testing.expectEqual(expected_u16, v_u16);
 }
 
